@@ -2,6 +2,7 @@ use PPI;
 use PPI::Dumper;
 use Getopt::Long;
 use Pod::Usage;
+use Options;
 our $VERSION=1.0;
 sub debug ($) {
     printf STDERR "DEBUG: %s\n", $_[0] if $opts{'verbose'}>0;
@@ -28,7 +29,19 @@ sub p2u {
     );
 }
 our %opts=a2h(qw(Xcomment Xws Sws Sqw Xeobs Xeolc Xeola));
-GetOptions(\%opts,
+our @_opts=(
+    'Xdoc!' => ['Xpod!','Xcomment|Xcom!'],
+    'Xend!',
+    'Xdata!',
+    'Xour!' => [\'Xpragma!'],
+    'Xpragma!',
+    'ws|space|whitespace!' => ['Xws|Xspace|Xwhitespace!','Sws|Sspace|Swhitespace!'],
+    'Sqw!',
+    'Xedelim|Xextra-delimiters!' => ['Xeobs!','Xeobc!','Xeola!'],
+    'Sstr|Sstring!',
+    'Sfor|Sforeach!'
+);
+Options::Get(\%opts,\@_opts,
     'help|h|H|?' => sub {p2u(1)},
     'manual|man' => sub {p2u(2)},
     'version' => sub {p2u(99,'',-sections=>['VERSION','AUTHOR'])},
@@ -36,22 +49,6 @@ GetOptions(\%opts,
     'verbose|v' => sub {$opts{'verbose'}++;},
     'quiet|q' => sub {$opts{'verbose'}--;},
     'dump',
-    'Xdoc!' => sub {$opts{$_}=$_[1] foreach (qw(Xpod Xcomment))},
-    'Xpod!',
-    'Xcomment|Xcom!',
-    'Xend!',
-    'Xdata!',
-    'Xour!' => sub {if ($_[1] == 1) {$opts{'Xpragma'} = 2} elsif ($opts{'Xpragma'} == 2) {$opts{'Xpragma'}=0}},
-    'Xpragma!',
-    'ws|space|whitespace!' => sub {$opts{$_}=$_[1] foreach (qw(Xws Sws))},
-    'Xws|Xspace|Xwhitespace!',
-    'Sws|Sspace|Swhitespace!',
-    'Sqw',
-    'Xedelim|Xextra-delimiters!' => sub {$opts{$_}=$_[1] foreach (qw(Xeobs Xeolc Xeola))},
-    'Xeobs!',
-    'Xeolc!',
-    'Xeola!',
-    'Sstr|Sstring!'
 ) || ($opts{'verbose'}>-2 ? p2u(1) : exit 255);
 our $d;
 while (<>){$d.=$_;}
@@ -221,11 +218,19 @@ if ($opts{'Sstr'}) {
         }
         if (!$qq) {
             $_->set_content('"'.$c.'"');
-            $_->simplify();
+            #$_->simplify();
         }else{
             $_->set_content('qq'.$spc.$da.$c.$db);
         }
     }@{$doc->find(sub {my $c=$_[1]->class();$c eq 'PPI::Token::Quote::Double' || $c eq 'PPI::Token::Quote::Interpolate'})}
+}
+if ($opts{'Sfor'}) {
+    notice '  replace foreach with for';
+    map {
+        if ($_->first_token() eq 'foreach') {
+            $_->first_token()->set_content('for');
+        }
+    } @{$doc->find('PPI::Statement::Compound')};
 }
 #Trailing ;
 my $lt=$doc->last_token();
