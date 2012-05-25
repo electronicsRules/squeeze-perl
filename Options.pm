@@ -33,7 +33,7 @@ sub Get {
     foreach (keys %opts) {
         if (ref $opts{$_}) {
             push @_opts, $_, sub {Options::_cb(@_,$store,\%opts);};
-            push @_opts, grep {!$check{_clean_name($_)}} map {ref $_ ? $$_ : $_} @{$_others};
+            push @_opts, grep {!$check{_clean_name($_)}} map {ref $_ ? $$_ : $_} @{$opts{$_}};
         }else{
             push @_opts, $_;
         }

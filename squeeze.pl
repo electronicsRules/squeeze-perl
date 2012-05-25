@@ -28,7 +28,7 @@ sub p2u {
         @rest
     );
 }
-our %opts=a2h(qw(Xcomment Xws Sws Sqw Xeobs Xeolc Xeola));
+our %opts=a2h(qw(Xcomment ws Xws Sws Sqw Xeobs Xeolc Xeola));
 our @_opts=(
     'Xdoc!' => ['Xpod!','Xcomment|Xcom!'],
     'Xend!',
@@ -39,7 +39,8 @@ our @_opts=(
     'Sqw!',
     'Xedelim|Xextra-delimiters!' => ['Xeobs!','Xeobc!','Xeola!'],
     'Sstr|Sstring!',
-    'Sfor|Sforeach!'
+    'Sfor|Sforeach!',
+    'Sderef|Sdereference!'
 );
 Options::Get(\%opts,\@_opts,
     'help|h|H|?' => sub {p2u(1)},
@@ -82,26 +83,24 @@ if ($opts{'Xend'}) {
     $doc->prune('PPI::Statement::End');
 }
 if ($opts{'Xdata'}) {
-    notice "__DATA__";
+    notice "  __DATA__";
     $doc->prune('PPI::Statement::Data');
 }
-
 if ($opts{'Xour'} or $opts{'Xpragma'}) {
-notice "  our, strict";
-#Get rid of our and use strict;use warnings
-$doc->prune(sub {
-    if ($opts{'Xour'} and $_[1]->class() eq 'PPI::Token::Word' and $_[1]->content eq 'our') {
-        debug "'$_[1]' removed [our]";
-        return 1;
-    }
-    my %pmods=a2h(qw(strict warnings));
-    if ($opts{'Xpragma'} and $_[1]->class() eq 'PPI::Statement::Include' and $pmods{$_[1]->module()}) {
-        debug "'$_[1]' removed [our => strict/warnings]";
-        return 1;
-    }
-});
+    notice "  our, strict";
+    #Get rid of our and use strict;use warnings
+    $doc->prune(sub {
+        if ($opts{'Xour'} and $_[1]->class() eq 'PPI::Token::Word' and $_[1]->content eq 'our') {
+            debug "'$_[1]' removed [our]";
+            return 1;
+        }
+        my %pmods=a2h(qw(strict warnings));
+        if ($opts{'Xpragma'} and $_[1]->class() eq 'PPI::Statement::Include' and $pmods{$_[1]->module()}) {
+            debug "'$_[1]' removed [our => strict/warnings]";
+            return 1;
+        }
+    });
 }
-
 sub a2h { #('list','of','stuff') => ('list' => 1,'of' => 1,'stuff' => 1)
     my (@arr,%hash)=@_;
     $hash{$_}=1 foreach @arr;
@@ -141,7 +140,7 @@ if ($opts{'Xws'}) {
             ($pc eq 'PPI::Token::Operator' and ((!$npo{$nc}) or $iops{$p})) or #Operator, whitespace, Operator-or-non-word
             ($t->previous_token() && $t->previous_token()->class() eq 'PPI::Token::Operator' and ((!$npo{$nc}) or $iops{$t->previous_token()})) or #Ditto
             ($nc eq 'PPI::Token::Operator' and ((!($bpo{$pc} or $bpo{$t->previous_token()->class()})) or $iops{$n->content()})) or #Ditto, in reverse
-            ($pc eq 'PPI::Token::Word' and (1 or $_words{$p->content()}) and ($nc eq 'PPI::Token::Symbol' or $n->isa('PPI::Structure'))) or #word, symbol-or-structure
+            ($pc eq 'PPI::Token::Word' and (1 or $_words{$p->content()}) and ($nc eq 'PPI::Token::Regexp::Match' or $nc eq 'PPI::Token::Cast' or $nc eq 'PPI::Token::Symbol' or $n->isa('PPI::Structure'))) or #word, symbol-or-structure
             ($t->next_token() && $t->next_token()->class() eq 'PPI::Token::Structure' and $t->next_token() eq ')') or #whitespace at the end of a () list
             ($pc eq 'PPI::Token::Label') # LABEL:
             );
@@ -232,9 +231,39 @@ if ($opts{'Sfor'}) {
         }
     } @{$doc->find('PPI::Statement::Compound')};
 }
-#Trailing ;
-my $lt=$doc->last_token();
-if ($lt->class() eq 'PPI::Token::Structure' and $lt eq ';') {$lt->remove();};
+if ($opts{'Sderef'}) {
+    notice '  shorten $x->{\'y\'} and $x->[2]';
+    map {
+        my $p=$_->previous_token();
+        my $pp=$p->previous_token();
+        if ($p->class() eq 'PPI::Token::Operator' and $p eq '->' and
+          $pp->class() eq 'PPI::Token::Symbol')
+            {
+            $pp->insert_before(PPI::Token::Cast->new('$'));
+            $p->remove();
+            }
+    } @{$doc->find('PPI::Structure::Subscript')};
+    notice '  shorten %{$var}';
+    map {
+        my $n=$_->next_sibling();
+        if ($n->class() eq 'PPI::Structure::Block') {
+            my @c=$n->children();
+            if (scalar(@c)==1 and $c[0]->class() eq 'PPI::Statement') {
+                my @sc=$c[0]->children();
+                if (scalar(@sc)==1 and $sc[0]->class() eq 'PPI::Token::Symbol') {
+                    $_->insert_after(new PPI::Token::Symbol($sc[0]));
+                    $n->remove();
+                }
+            }
+        }
+    } @{$doc->find('PPI::Token::Cast')};
+}
+#Trailing ; and whitespace
+do {
+    my $lt=$doc->last_token();
+    if (($lt->class() eq 'PPI::Token::Structure' and $lt eq ';')
+     or ($opts{'Xws'} and $lt->class() eq 'PPI::Token::Whitespace')) {$lt->remove();} else {$lt=undef};
+} while ($lt);
 #Leading whitespace
 my $ft=$doc->first_token();
 if ($ft->class() eq 'PPI::Token::Whitespace') {$ft->remove();}
@@ -259,7 +288,7 @@ if ($opts{'dump'}) {notice "Dumping...";d($doc);}
 notice "Serializing...";
 my $ser=$doc->serialize();
 print "$ser\n";
-notice sprintf "Ratio: %3i%%\n",(length($ser)/length($d))*100;
+notice sprintf "Ratio: %3.2f%%\n",(length($ser)/length($d))*100;
 __END__
 =pod
 
