@@ -3,7 +3,10 @@ use PPI::Dumper;
 use Getopt::Long;
 use Pod::Usage;
 use Options;
-our $VERSION=1.0;
+use strict;
+use warnings;
+our $VERSION=1.6;
+our %opts;
 sub debug ($) {
     printf STDERR "DEBUG: %s\n", $_[0] if $opts{'verbose'}>0;
 }
@@ -28,7 +31,8 @@ sub p2u {
         @rest
     );
 }
-our %opts=a2h(qw(Xcomment ws Xws Sws Sqw Xeobs Xeolc Xeola));
+%opts=a2h(qw(Xcomment ws Xws Sws Sqw Xeobs Xeolc Xeola));
+$opts{'verbose'}=0;
 our @_opts=(
     'Xdoc!' => ['Xpod!','Xcomment|Xcom!'],
     'Xend!',
@@ -40,7 +44,8 @@ our @_opts=(
     'Xedelim|Xextra-delimiters!' => ['Xeobs!','Xeobc!','Xeola!'],
     'Sstr|Sstring!',
     'Sfor|Sforeach!',
-    'Sderef|Sdereference!'
+    'Sderef|Sdereference!',
+    'Scall'
 );
 Options::Get(\%opts,\@_opts,
     'help|h|H|?' => sub {p2u(1)},
@@ -106,6 +111,14 @@ sub a2h { #('list','of','stuff') => ('list' => 1,'of' => 1,'stuff' => 1)
     $hash{$_}=1 foreach @arr;
     return %hash;
 }
+my %iops=a2h( #Operators which can be placed directly after words; $var==42 etc
+    '=','->','++','--','**','!','~',
+    '\\','+','-','=~','!~','*','/',
+    '%','.','<<','>>','<','>','<=',
+    '>=','==','!=','<=>','~~','|',
+    '^','&&','||','=',',','?',':',
+    '=>','.=','+=','-=','*=','/='
+);
 if ($opts{'Xws'}) {
     notice "  whitespace";
     #Attempts to strip as much whitespace as possible
@@ -113,18 +126,10 @@ if ($opts{'Xws'}) {
         my $t=$_[1];
         my $tc=$t->class();
         my $n=$t->next_sibling();
-        my $nc=$n?$n->class():undef;
+        my $nc=$n?$n->class():'';
         my $p=$t->previous_sibling();
-        my $pc=$p?$p->class():undef;
-        my %iops=a2h( #Operators which can be placed directly after words; $var==42 etc
-            '=','->','++','--','**','!','~',
-            '\\','+','-','=~','!~','*','/',
-            '%','.','<<','>>','<','>','<=',
-            '>=','==','!=','<=>','~~','|',
-            '^','&&','||','=',',','?',':',
-            '=>','.=','+=','-=','*=','/='
-        );
-        #my %_words=a2h(qw(if else elsif unless exists map grep defined join)); #Words which can have a $symbol directly after them
+        my $pc=$p?$p->class():'';
+        my %_words=a2h(qw(if else elsif unless exists map grep defined join)); #Words which can have a $symbol directly after them
         #Tokens which need a whitespace after them
         my %bpo=a2h('PPI::Token::Symbol','PPI::Token::Word','PPI::Token::Magic','PPI::Token::Operator','PPI::Token::Regexp::Match','PPI::Token::Regexp::Substitute','PPI::Token::Regexp::Transliterate');
         #Tokens which need a whitespace before them
@@ -150,14 +155,14 @@ if ($opts{'Xws'}) {
 };
 if ($opts{'Sws'}) {
     notice "  shorten ws";
-    map {$_->set_content(' ')} @{$doc->find('PPI::Token::Whitespace')};
+    map {$_->set_content(' ')} @{$doc->find('PPI::Token::Whitespace') || []};
 }
 if ($opts{'Xeobs'}) {
     notice "  end-of-block semicolons";
     map {
         my $t=$_->last_token()->previous_token();
         if ($t && $t->class eq 'PPI::Token::Structure' && $t eq ';') {$t->remove()}
-        } @{$doc->find('PPI::Structure::Block')};
+        } @{$doc->find('PPI::Structure::Block') || []};
 }
 if ($opts{'Xeolc'} || $opts{'Xeola'}) {
     notice "  hanging colons and =>";
@@ -166,19 +171,19 @@ if ($opts{'Xeolc'} || $opts{'Xeola'}) {
         if ($t and ($t->class eq 'PPI::Token::Operator' && (($t eq ',' && $opts{'Xeolc'}) || ($t eq '=>' && $opts{'Xeola'}))) || ($t->class eq 'PPI::Token::Whitespace')) {$t->remove()}
         }@{$doc->find(sub {
             my $c=$_[1]->class();$c eq 'PPI::Structure::Constructor' or $c eq 'PPI::Structure::List';
-            })};
+            }) || []};
 }
 if ($opts{'Sqw'}) {
-notice "  qw()";
-#Squeeze qw() as much as possible
-map {
-    my $c=$_->content();
-    $c=~/^qw\s*([^ ]).*?(.)$/;
-    my $usespc=0;
-    my ($da,$db)=($1,$2);
-    if ($da=~/[a-zA-Z]/) {$usespc=1;};
-    $_->set_content('qw'.($usespc?' ':'').$da.(join ' ',$_->literal).$db);
-    }@{$doc->find('PPI::Token::QuoteLike::Words')};
+    notice "  qw()";
+    #Squeeze qw() as much as possible
+    map {
+        my $c=$_->content();
+        $c=~/^qw\s*([^ ]).*?(.)$/;
+        my $usespc=0;
+        my ($da,$db)=($1,$2);
+        if ($da=~/[a-zA-Z]/) {$usespc=1;};
+        $_->set_content('qw'.($usespc?' ':'').$da.(join ' ',$_->literal).$db);
+    }@{$doc->find('PPI::Token::QuoteLike::Words') || []};
 }
 if ($opts{'Sstr'}) {
     notice "  (safely) shorten strings";
@@ -221,7 +226,7 @@ if ($opts{'Sstr'}) {
         }else{
             $_->set_content('qq'.$spc.$da.$c.$db);
         }
-    }@{$doc->find(sub {my $c=$_[1]->class();$c eq 'PPI::Token::Quote::Double' || $c eq 'PPI::Token::Quote::Interpolate'})}
+    }@{$doc->find(sub {my $c=$_[1]->class();$c eq 'PPI::Token::Quote::Double' || $c eq 'PPI::Token::Quote::Interpolate'}) || []}
 }
 if ($opts{'Sfor'}) {
     notice '  replace foreach with for';
@@ -229,7 +234,7 @@ if ($opts{'Sfor'}) {
         if ($_->first_token() eq 'foreach') {
             $_->first_token()->set_content('for');
         }
-    } @{$doc->find('PPI::Statement::Compound')};
+    } @{$doc->find('PPI::Statement::Compound') || []};
 }
 if ($opts{'Sderef'}) {
     notice '  shorten $x->{\'y\'} and $x->[2]';
@@ -242,7 +247,7 @@ if ($opts{'Sderef'}) {
             $pp->insert_before(PPI::Token::Cast->new('$'));
             $p->remove();
             }
-    } @{$doc->find('PPI::Structure::Subscript')};
+    } @{$doc->find('PPI::Structure::Subscript') || []};
     notice '  shorten %{$var}';
     map {
         my $n=$_->next_sibling();
@@ -256,14 +261,34 @@ if ($opts{'Sderef'}) {
                 }
             }
         }
-    } @{$doc->find('PPI::Token::Cast')};
+    } @{$doc->find('PPI::Token::Cast') || []};
+}
+#sub_routine() -> sub_routine
+#$obj->method() -> $obj->method
+if ($opts{'Scall'}) {
+    map {
+        my $t=$_;
+        my $n=$_->snext_sibling();
+        my $nc=$n?$n->class():'';
+        if ($nc eq 'PPI::Structure::List') {
+            my @c=$n->schildren();
+            if (scalar(@c)==0) {
+                my $nn=$n->next_token();
+                my $nnc=$n?$n->class():'';
+                my %ok=a2h(qw(PPI::Token::Structure PPI::Token::Whitespace PPI::Token::Symbol));
+                if ($ok{$nnc} || ($nnc eq 'PPI::Token::Operator' and $iops{$nn->content()})) {$n->remove()}
+            }
+        }
+    } @{$doc->find('PPI::Token::Word') || []}
 }
 #Trailing ; and whitespace
-do {
-    my $lt=$doc->last_token();
+{my $lt;do {
+    $lt=undef;
+    $lt=$doc->last_token();
     if (($lt->class() eq 'PPI::Token::Structure' and $lt eq ';')
      or ($opts{'Xws'} and $lt->class() eq 'PPI::Token::Whitespace')) {$lt->remove();} else {$lt=undef};
 } while ($lt);
+}
 #Leading whitespace
 my $ft=$doc->first_token();
 if ($ft->class() eq 'PPI::Token::Whitespace') {$ft->remove();}
@@ -279,7 +304,7 @@ if (!$opts{'Xcomment'} and ($opts{'Xws'} or $opts{'Sws'})) {
                 $_->insert_after(PPI::Token::Whitespace->new("\n"));
             }
         }
-    }@{$doc->find('PPI::Token::Comment')};
+    }@{$doc->find('PPI::Token::Comment') || []};
 }
 #print STDERR "Reinserting __END__ and __DATA__...\n";
 #$doc->last_token()->insert_after($s_end) if $s_end;
@@ -302,7 +327,7 @@ perl squeeze.pl [options] [input files]
 
 =head1 VERSION
 
-squeeze.pl 1.1
+squeeze.pl 1.6
 
 =head1 OPTIONS
 
@@ -332,7 +357,11 @@ squeeze.pl 1.1
    Xeobs                     End-Of-Block semicolons
    Xeolc                     End-Of-List commas
    Xeola                     End-Of-List arrows (=>)
- Sstr|Sstring                replaces escape sequences with characters
+ Sstr|Sstring                replace escape sequences with characters
+ Sfor|Sforeach               replace foreach with for
+ Sderef|Sdereference         $x->{'y'} => $x{'y'}
+                             %{$x} -> %$x
+ Scall                       remove empty lists after subroutine calls
 
 =head1 AUTHOR
 
