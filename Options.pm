@@ -16,7 +16,7 @@ sub Get {
     foreach (@$data) {
         if (defined $key && ref $_ eq 'ARRAY') {
             $opts{$key}=$_;
-            $check{_clean_name($key)}=1;
+            $check{_clean_name($key)}=$_;
             undef $key;
         }elsif (!ref $_ and !defined $key) {
             $key=$_;
@@ -30,13 +30,13 @@ sub Get {
     }
     $opts{$key}=1 if defined $key;
     $check{_clean_name($key)}=1 if defined $key;
-    foreach (keys %opts) {
-        if (ref $opts{$_}) {
-            push @_opts, $_, sub {Options::_cb(@_,$store,\%opts);};
-	    $store->{_clean_name($_)}=0 if not defined $store->{$_};
-            push @_opts, map {$store->{_clean_name($_)}=0 if not defined $store->{$_}} grep {!$check{_clean_name($_)}} map {ref $_ ? $$_ : $_} @{$opts{$_}};
+    foreach my $k (keys %opts) {
+        $store->{_clean_name($k)}=0 if not defined $store->{_clean_name($k)};
+        if (ref $opts{$k}) {
+            push @_opts, $k, sub {Options::_cb(@_,$store,\%check);};
+            push @_opts, map {$store->{_clean_name($_)}=0 if not defined $store->{_clean_name($_)};$_} grep {!$check->{_clean_name($_)}} map {ref $_ ? $$_ : $_} @{$opts{$k}};
         }else{
-            push @_opts, $_;
+            push @_opts, $k;
         }
     }
     my $r=GetOptions($store,@_opts,@others);
@@ -49,8 +49,8 @@ sub Get {
 }
 
 sub _cb {
-    my ($oname,$val,$data,$other,$int)=@_;
-    $oname=_clean_name($oname);
+    my ($opt,$val,$data,$other,$int)=@_;
+    my $oname=_clean_name($opt);
     $data->{$oname}=$val unless $int;
     if ($val==1) {
         foreach (@{$other->{$oname}}) {
