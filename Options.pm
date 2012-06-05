@@ -1,7 +1,7 @@
 package Options;
 use 5.006;
-use strict;
-use warnings;
+#turn off strictures for speed#
+use strict;use warnings;
 use Carp;
 use Getopt::Long;
 
@@ -33,8 +33,11 @@ sub Get {
     foreach my $k (keys %opts) {
         $store->{_clean_name($k)}=0 if not defined $store->{_clean_name($k)};
         if (ref $opts{$k}) {
-            push @_opts, $k, sub {Options::_cb(@_,$store,\%check);};
-            push @_opts, map {$store->{_clean_name($_)}=0 if not defined $store->{_clean_name($_)};$_} grep {!$check->{_clean_name($_)}} map {ref $_ ? $$_ : $_} @{$opts{$k}};
+            push @_opts, $k, sub {Options::_cb($_[0],$_[1],$_[2],$store,\%check);};
+            push @_opts, 
+                map {$store->{_clean_name($_)}=0 if not defined $store->{_clean_name($_)};$_}
+                grep {!$check{_clean_name($_)}}
+                map {ref $_ ? $$_ : $_} @{$opts{$k}};
         }else{
             push @_opts, $k;
         }
@@ -52,10 +55,11 @@ sub _cb {
     my ($opt,$val,$data,$other,$int)=@_;
     my $oname=_clean_name($opt);
     $data->{$oname}=$val unless $int;
+    return unless ref $other->{$oname};
     if ($val==1) {
         foreach (@{$other->{$oname}}) {
             if (ref $_) {
-                $data->{_clean_name($$_)}->{$oname}=1;
+                #$data->{_clean_name($$_)}->{$oname}=1;
                 _cb($$_,$val,$data,$other,1);
             }else{
                 #$data->{_clean_name($_)}=1;
