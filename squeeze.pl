@@ -266,6 +266,8 @@ if ($opts{'Sderef'}) {
 #sub_routine() -> sub_routine
 #$obj->method() -> $obj->method
 if ($opts{'Scall'}) {
+    notice '  shorten subroutine and method calls';
+    my %ok=a2h(qw(PPI::Token::Structure PPI::Token::Whitespace PPI::Token::Symbol));
     map {
         my $t=$_;
         my $n=$_->snext_sibling();
@@ -274,8 +276,7 @@ if ($opts{'Scall'}) {
             my @c=$n->schildren();
             if (scalar(@c)==0) {
                 my $nn=$n->next_token();
-                my $nnc=$n?$n->class():'';
-                my %ok=a2h(qw(PPI::Token::Structure PPI::Token::Whitespace PPI::Token::Symbol));
+                my $nnc=$nn?$nn->class():'';
                 if ($ok{$nnc} || ($nnc eq 'PPI::Token::Operator' and $iops{$nn->content()})) {$n->remove()}
             }
         }
