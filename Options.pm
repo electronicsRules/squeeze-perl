@@ -33,7 +33,7 @@ sub Get {
     foreach my $k (keys %opts) {
         $store->{_clean_name($k)}=0 if not defined $store->{_clean_name($k)};
         if (ref $opts{$k}) {
-            push @_opts, $k, sub {Options::_cb($_[0],$_[1],$_[2],$store,\%check);};
+            push @_opts, $k, sub {Options::_cb($_[0],$_[1],$_[2] || $store,\%check);};
             push @_opts, 
                 map {$store->{_clean_name($_)}=0 if not defined $store->{_clean_name($_)};$_}
                 grep {!$check{_clean_name($_)}}
@@ -60,7 +60,7 @@ sub _cb {
         foreach (@{$other->{$oname}}) {
             if (ref $_) {
                 #$data->{_clean_name($$_)}->{$oname}=1;
-                _cb($$_,$val,$data,$other,1);
+                _cb($$_,$val,$data,$other,0);
             }else{
                 #$data->{_clean_name($_)}=1;
                 _cb($_,$val,$data,$other,0);
