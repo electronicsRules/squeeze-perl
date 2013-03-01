@@ -31,7 +31,7 @@ sub p2u {
         @rest
     );
 }
-%opts=a2h(qw(Xcomment ws Xws Sws Sqw Xeobs Xeolc Xeola));
+%opts=a2h(qw(Xcomment ws Sqw Xedelim));
 $opts{'verbose'}=0;
 our @_opts=(
     'Xdoc!' => ['Xpod!','Xcomment|Xcom!'],
@@ -45,7 +45,7 @@ our @_opts=(
     'Sstr|Sstring!',
     'Sfor|Sforeach!',
     'Sderef|Sdereference!',
-    'Scall'
+    'Scall!'
 );
 Options::Get(\%opts,\@_opts,
     'help|h|H|?' => sub {p2u(1)},
@@ -75,13 +75,13 @@ if ($opts{'Xcomment'}) {
     $doc->prune('PPI::Token::Comment');
 }elsif ($opts{'Xws'}){
     notice "  whitespace before comments";
-    map {
-        if ($_->previous_token()->class() eq 'PPI::Token::Whitespace') {
+    foreach (@{$doc->find('PPI::Token::Comment')}) {
+        if ($_->previous_token() && $_->previous_token()->class() eq 'PPI::Token::Whitespace') {
             $_->previous_token()->remove();
         }
         my $c=$_->content();
         $c=~s/^[ \t]+#/#/ and $_->set_content($c);
-    }@{$doc->find('PPI::Token::Comment')};
+    };
 }
 if ($opts{'Xend'}) {
     notice "  __END__";
@@ -181,22 +181,25 @@ if ($opts{'Sqw'}) {
         $c=~/^qw\s*([^ ]).*?(.)$/;
         my $usespc=0;
         my ($da,$db)=($1,$2);
-        if ($da=~/[a-zA-Z]/) {$usespc=1;};
-        $_->set_content('qw'.($usespc?' ':'').$da.(join ' ',$_->literal).$db);
+        if ($da and $db) {
+			if ($da=~/[a-zA-Z]/) {$usespc=1;};
+			$_->set_content('qw'.($usespc?' ':'').$da.(join ' ',$_->literal).$db);
+		}
     }@{$doc->find('PPI::Token::QuoteLike::Words') || []};
 }
 if ($opts{'Sstr'}) {
     notice "  (safely) shorten strings";
-    map {
+    foreach (@{$doc->find(sub {my $c=$_[1]->class();$c eq 'PPI::Token::Quote::Double' || $c eq 'PPI::Token::Quote::Interpolate'}) || []}) {
         my ($spc,$da,$c,$db,$qq);
         if ($_->isa('PPI::Token::Quote::Double')) {
             /^"(.*)"$/;
             $c=$1;
         }else{
-            $c=~/^qq( ?)(.)(.*)(.)$/;
+            /^qq( ?)(.)(.*)(.)$/;
             ($spc,$da,$c,$db)=($1,$2,$3,$4);
             $qq=1;
         }
+        next if not $c;
         if ($c=~/\\n/) {
             my @parts=split //,$c;
             $c='';
@@ -226,7 +229,7 @@ if ($opts{'Sstr'}) {
         }else{
             $_->set_content('qq'.$spc.$da.$c.$db);
         }
-    }@{$doc->find(sub {my $c=$_[1]->class();$c eq 'PPI::Token::Quote::Double' || $c eq 'PPI::Token::Quote::Interpolate'}) || []}
+    }
 }
 if ($opts{'Sfor'}) {
     notice '  replace foreach with for';
