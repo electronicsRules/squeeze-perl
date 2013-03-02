@@ -50,6 +50,7 @@ our @_opts=(
 Options::Get(\%opts,\@_opts,
     'help|h|H|?' => sub {p2u(1)},
     'manual|man' => sub {p2u(2)},
+    'reset' => sub {%opts=('verbose' => 0)},
     'version' => sub {p2u(99,'',-sections=>['VERSION','AUTHOR'])},
     'author' => sub {p2u(99,'',-sections=>['AUTHOR'])},
     'verbose|v' => sub {$opts{'verbose'}++;},
@@ -129,11 +130,11 @@ if ($opts{'Xws'}) {
         my $nc=$n?$n->class():'';
         my $p=$t->previous_sibling();
         my $pc=$p?$p->class():'';
-        my %_words=a2h(qw(if else elsif unless exists map grep defined join)); #Words which can have a $symbol directly after them
+        my %_words=a2h(qw(if else elsif unless exists map grep defined join my our push)); #Words which can have a $symbol directly after them
         #Tokens which need a whitespace after them
         my %bpo=a2h('PPI::Token::Symbol','PPI::Token::Word','PPI::Token::Magic','PPI::Token::Operator','PPI::Token::Regexp::Match','PPI::Token::Regexp::Substitute','PPI::Token::Regexp::Transliterate');
         #Tokens which need a whitespace before them
-        my %npo=a2h('PPI::Token::Word','PPI::Token::Operator','PPI::Token::Quote::Literal');
+        my %npo=a2h('PPI::Token::Word','PPI::Token::Operator','PPI::Token::Quote::Literal','PPI::Token::Regexp::Match','PPI::Token::Regexp::Substitute','PPI::Token::Regexp::Transliterate');
         return 1 if $tc eq 'PPI::Token::Whitespace' and (
             ($nc eq 'PPI::Token::Whitespace') or #Unlikely
             ($t->next_token() && $t->next_token()->class() eq 'PPI::Token::Whitespace') or #>_< just in case...
@@ -145,7 +146,7 @@ if ($opts{'Xws'}) {
             ($pc eq 'PPI::Token::Operator' and ((!$npo{$nc}) or $iops{$p})) or #Operator, whitespace, Operator-or-non-word
             ($t->previous_token() && $t->previous_token()->class() eq 'PPI::Token::Operator' and ((!$npo{$nc}) or $iops{$t->previous_token()})) or #Ditto
             ($nc eq 'PPI::Token::Operator' and ((!($bpo{$pc} or $bpo{$t->previous_token()->class()})) or $iops{$n->content()})) or #Ditto, in reverse
-            ($pc eq 'PPI::Token::Word' and ($_words{$p->content()}) and ($nc eq 'PPI::Token::Regexp::Match' or $nc eq 'PPI::Token::Cast' or $nc eq 'PPI::Token::Symbol' or $n->isa('PPI::Structure'))) or #word, symbol-or-structure
+            ($pc eq 'PPI::Token::Word' and (1 or $_words{$p->content()}) and ($nc eq 'PPI::Token::Cast' or $nc eq 'PPI::Token::Symbol' or $n->isa('PPI::Structure'))) or #word, symbol-or-structure
             ($t->next_token() && $t->next_token()->class() eq 'PPI::Token::Structure') or #whitespace at the end of a () list
             ($pc eq 'PPI::Token::Label') # LABEL:
             );
@@ -292,6 +293,16 @@ if ($opts{'Scall'}) {
 #Leading whitespace
 my $ft=$doc->first_token();
 if ($ft->class() eq 'PPI::Token::Whitespace') {$ft->remove();}
+if ($opts{'Sws'}) {
+    notice "  shorten ws";
+    map {$_->set_content(' ')} @{$doc->find('PPI::Token::Whitespace') || []};
+    $doc->prune(sub {
+		my $t=$_[1];
+        my $tc=$t->class();
+        return 0 if $tc ne 'PPI::Token::Whitespace';
+        return 1 if $t->previous_token() and $t->previous_token()->class() eq 'PPI::Token::Whitespace'
+    });
+}
 sub d {select STDERR;PPI::Dumper->new($_[0])->print;select STDOUT;}
 notice "Reinserting...";
 if (!$opts{'Xcomment'} and ($opts{'Xws'} or $opts{'Sws'})) {
@@ -306,15 +317,47 @@ if (!$opts{'Xcomment'} and ($opts{'Xws'} or $opts{'Sws'})) {
         }
     }@{$doc->find('PPI::Token::Comment') || []};
 }
-if ($opts{'Sws'}) {
-    notice "  shorten ws";
-    map {$_->set_content(' ')} @{$doc->find('PPI::Token::Whitespace') || []};
-    $doc->prune(sub {
-		my $t=$_[1];
-        my $tc=$t->class();
-        return 0 if $tc ne 'PPI::Token::Whitespace';
-        return 1 if $t->previous_token() and $t->previous_token()->class() eq 'PPI::Token::Whitespace';
-    });
+if (!$opts{'Xpod'} && ($opts{'Sws'} || $opts{'Xws'})) {
+	notice "  fix POD";
+	foreach (@{$doc->find('PPI::Token::Pod') || []}) {
+		my $p=$_->previous_token();
+		my $n=$_->next_token();
+		if ($p) {
+			if ($p->class() ne 'PPI::Token::Whitespace') {
+				$_->insert_before(PPI::Token::Whitespace->new("\n"));
+			}else{
+				$p->set_content($p->content()."\n");
+			}
+		}
+		if ($n) {
+			if ($n->class() ne 'PPI::Token::Whitespace') {
+				$_->insert_after(PPI::Token::Whitespace->new("\n"));
+			}else{
+				$n->set_content("\n".$n->content());
+			}
+		}
+	}
+}
+if (!($opts{'Xend'} || $opts{'Xdata'}) && ($opts{'Sws'} || $opts{'Xws'})) {
+	notice "  fix END/DATA";
+	foreach (@{$doc->find('PPI::Statement::End') || []},@{$doc->find('PPI::Statement::Data') || []}) {
+		my $p=$_->previous_token();
+		my $n=$_->next_token();
+		if ($p) {
+			if ($p->class() ne 'PPI::Token::Whitespace') {
+				$_->insert_before(PPI::Token::Whitespace->new("\n"));
+			}else{
+				$p->set_content($p->content()."\n");
+			}
+		}
+		if ($n) {
+			if ($n->class() ne 'PPI::Token::Whitespace') {
+				$_->insert_after(PPI::Token::Whitespace->new("\n"));
+			}else{
+				$n->set_content("\n".$n->content());
+			}
+		}
+	}
 }
 #print STDERR "Reinserting __END__ and __DATA__...\n";
 #$doc->last_token()->insert_after($s_end) if $s_end;
